@@ -1,0 +1,8 @@
+*
+!requirements.txt
+!requirements-dev.txt
+!pyproject.toml
+!chunker/
+!tests/
+**/__pycache__
+**/*.pyc

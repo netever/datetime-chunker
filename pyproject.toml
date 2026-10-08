@@ -1,0 +1,12 @@
+[project]
+name = "chunker"
+version = "1.0.0"
+description = "Split a pandas DataFrame into chunks by a datetime column without splitting equal timestamps"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "pandas>=2.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --durations=5"
+timeout = 120  # pytest-timeout: зацикливание алгоритма — это падение теста, а не зависание

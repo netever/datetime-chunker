@@ -1,0 +1,20 @@
+x-chunker: &chunker
+  build: .
+  image: datetime-chunker:latest
+
+services:
+  # Демо на сгенерированных данных: docker compose run --rm app
+  app:
+    <<: *chunker
+    command:
+      - python
+      - -m
+      - chunker
+      - --rows=${ROWS:-1000000}
+      - --chunk-size=${CHUNK_SIZE:-100000}
+      - --max-repeats=${MAX_REPEATS:-5}
+
+  # Юнит-тесты, включая прогоны на 1 000 000+ строк: docker compose run --rm tests
+  tests:
+    <<: *chunker
+    command: ["python", "-m", "pytest", "-p", "no:cacheprovider"]
