@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from chunker import generate_frame
+from chunker import generate_batches, generate_frame
 
 
 @pytest.mark.parametrize("n_rows", [0, 1, 7, 1_000, 1_000_000])
@@ -71,3 +71,52 @@ def test_generation_peak_memory_is_close_to_frame_size(shuffle, max_bytes_per_ro
 def test_invalid_arguments(kwargs):
     with pytest.raises(ValueError):
         generate_frame(**kwargs)
+
+
+class TestGenerateBatches:
+    @pytest.mark.parametrize(("n_rows", "batch_size"), [(0, 10), (1, 10), (10, 10), (1_000, 7), (1_000_000, 65_537)])
+    def test_batch_sizes_and_total(self, n_rows, batch_size):
+        sizes = [len(batch) for batch in generate_batches(n_rows, batch_size)]
+        assert sum(sizes) == n_rows
+        assert all(size == batch_size for size in sizes[:-1])
+        assert all(0 < size <= batch_size for size in sizes)
+
+    def test_batches_form_one_sorted_frame(self):
+        df = pd.concat(generate_batches(100_000, 9_999))
+        assert df["dt"].is_monotonic_increasing
+        assert df.index.equals(pd.RangeIndex(100_000))
+        assert np.array_equal(df["id"].to_numpy(), np.arange(100_000))
+        assert df.dtypes.to_dict() == generate_frame(10).dtypes.to_dict()
+
+    @pytest.mark.parametrize("batch_size", [1, 3, 1_000])
+    def test_repeats_are_bounded_across_batch_boundaries(self, batch_size):
+        df = pd.concat(generate_batches(5_000, batch_size, max_repeats=7))
+        counts = df["dt"].value_counts()
+        assert counts.max() == 7
+        assert counts.min() >= 1
+
+    def test_groups_straddle_batch_boundaries(self):
+        batches = list(generate_batches(100_000, 1_000, max_repeats=5))
+        straddling = sum(a["dt"].iloc[-1] == b["dt"].iloc[0] for a, b in zip(batches, batches[1:]))
+        assert straddling > len(batches) // 2
+
+    def test_deterministic_with_seed(self):
+        for a, b in zip(generate_batches(10_000, 999, seed=3), generate_batches(10_000, 999, seed=3), strict=True):
+            pd.testing.assert_frame_equal(a, b)
+
+    def test_is_lazy_and_memory_bounded_by_batch(self):
+        """10M строк генерируются в памяти порядка одной пачки, а не всего объёма."""
+        batch_size = 100_000
+        tracemalloc.start()
+        try:
+            for _ in generate_batches(10_000_000, batch_size):
+                pass
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        assert peak < batch_size * 20 * 3
+
+    @pytest.mark.parametrize("kwargs", [{"n_rows": -1}, {"batch_size": 0}, {"max_repeats": 0}])
+    def test_invalid_arguments_are_raised_eagerly(self, kwargs):
+        with pytest.raises(ValueError):
+            generate_batches(**kwargs)

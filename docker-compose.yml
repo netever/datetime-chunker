@@ -4,18 +4,21 @@ x-chunker: &chunker
 
 services:
   # Демо на сгенерированных данных: docker compose run --rm app
+  #   SAVE_CHUNKS=1 — каждый чанк пишется в ./output/chunk_NNN.csv (по умолчанию выключено);
+  #   STREAM=1      — данные генерируются и разбиваются потоком пачками по BATCH_SIZE строк,
+  #                   память не зависит от ROWS (по умолчанию весь фрейм в памяти).
+  # Пустые ${VAR:+...} просто исчезают из строки команды.
   app:
     <<: *chunker
-    command:
-      - python
-      - -m
-      - chunker
-      - --rows=${ROWS:-1000000}
-      - --chunk-size=${CHUNK_SIZE:-100000}
-      - --max-repeats=${MAX_REPEATS:-5}
-      - --show=${SHOW:-5}
-      # SAVE_CHUNKS=1 → каждый чанк пишется в ./output/chunk_NNN.csv; по умолчанию выключено.
-      - --output-dir=${SAVE_CHUNKS:+output}
+    command: >-
+      python -m chunker
+      --rows=${ROWS:-1000000}
+      --chunk-size=${CHUNK_SIZE:-100000}
+      --max-repeats=${MAX_REPEATS:-5}
+      --show=${SHOW:-5}
+      --batch-size=${BATCH_SIZE:-1000000}
+      ${STREAM:+--stream}
+      ${SAVE_CHUNKS:+--output-dir=output}
     volumes:
       - ./output:/app/output
 

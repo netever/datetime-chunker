@@ -6,12 +6,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Iterator
+from collections.abc import Hashable, Iterable, Iterator
 
 import numpy as np
 import pandas as pd
 
-__all__ = ["chunk_bounds", "split_by_datetime"]
+__all__ = ["chunk_bounds", "split_by_datetime", "split_stream"]
 
 # Проверка сортировки идёт блоками: временная bool-маска не больше 64 KiB.
 _SORT_CHECK_BLOCK = 1 << 16
@@ -50,6 +50,78 @@ def split_by_datetime(
     if assume_sorted or _is_sorted(keys):
         return (df.iloc[start:stop] for start, stop in _iter_bounds(keys, chunk_size))
     return _iter_unsorted(df, keys, chunk_size)
+
+
+def split_stream(
+    batches: Iterable[pd.DataFrame],
+    column: Hashable,
+    chunk_size: int,
+) -> Iterator[pd.DataFrame]:
+    """Потоковый вариант ``split_by_datetime`` для данных, которые не помещаются в память.
+
+    ``batches`` — любой источник DataFrame-пачек: ``pd.read_csv(..., chunksize=N)``,
+    parquet по row group'ам, курсор БД с ``ORDER BY``. Пачки должны быть отсортированы
+    по ``column`` и идти друг за другом по времени; группа одинаковых дат может
+    разрываться между пачками — она склеивается. Результат совпадает
+    с ``split_by_datetime`` на склеенном фрейме.
+
+    Память: O(batch_size + chunk_size) независимо от общего числа строк — в памяти
+    текущая пачка и строки незавершённого чанка. Чанк внутри одной пачки — view,
+    чанк на стыке пачек собирается ``pd.concat`` (копия размером с чанк).
+
+    Время: O(n) на проверку порядка (потоку нельзя доверять на слово)
+    плюс один бинарный поиск на чанк. Неотсортированный поток — ``ValueError``.
+    """
+    _validate_chunk_size(chunk_size)
+    return _iter_stream(batches, column, chunk_size)
+
+
+def _iter_stream(batches: Iterable[pd.DataFrame], column: Hashable, chunk_size: int) -> Iterator[pd.DataFrame]:
+    pending: list[pd.DataFrame] = []  # строки незавершённого чанка из прошлых пачек
+    pending_len = 0
+    last_key = None  # последняя дата потока; ею заканчивается pending
+    for batch in batches:
+        keys = _int64_keys(batch[column])
+        n = len(keys)
+        if n == 0:
+            continue
+        if not _is_sorted(keys) or (last_key is not None and keys[0] < last_key):
+            raise ValueError(f"Batches must be sorted by {column!r} ascending, within and across batches")
+
+        offset = 0
+        while offset < n:
+            need = chunk_size - pending_len
+            if need > 0:
+                pivot = offset + need - 1
+                if pivot >= n:
+                    break  # строк не хватает — ждём следующую пачку
+                value = keys[pivot]
+            else:
+                # pending уже набрал chunk_size, но его последняя группа могла продолжиться здесь.
+                pivot, value = offset, last_key
+            stop = pivot + int(np.searchsorted(keys[pivot:], value, side="right"))
+            if stop == n:
+                break  # группа доходит до конца пачки и может продолжиться в следующей
+            if stop > offset:
+                pending.append(batch.iloc[offset:stop])
+            yield _take_all(pending)
+            pending_len = 0
+            offset = stop
+
+        if offset < n:
+            pending.append(batch.iloc[offset:])
+            pending_len += n - offset
+        last_key = keys[-1]
+
+    if pending:
+        yield _take_all(pending)
+
+
+def _take_all(pieces: list[pd.DataFrame]) -> pd.DataFrame:
+    """Склеивает куски и очищает список: пока чанк обрабатывают, генератор не держит их копию."""
+    chunk = pieces[0] if len(pieces) == 1 else pd.concat(pieces)
+    pieces.clear()
+    return chunk
 
 
 def chunk_bounds(keys: np.ndarray, chunk_size: int) -> Iterator[tuple[int, int]]:

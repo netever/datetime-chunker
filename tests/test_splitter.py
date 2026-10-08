@@ -19,19 +19,6 @@ def split_dates(df: pd.DataFrame, chunk_size: int, **kwargs) -> list[list[str]]:
     ]
 
 
-@pytest.fixture
-def doc_example_df() -> pd.DataFrame:
-    """Пример из условия задачи."""
-    return make_df(
-        "2023-01-01 00:00:01",
-        "2023-01-01 00:00:01",
-        "2023-01-01 00:00:02",
-        "2023-01-01 00:00:02",
-        "2023-01-01 00:00:02",
-        "2023-01-01 00:00:03",
-    )
-
-
 class TestTaskExamples:
     @pytest.mark.parametrize("chunk_size", [1, 2])
     def test_small_chunk_size_gives_three_chunks(self, doc_example_df, chunk_size):
