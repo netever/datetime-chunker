@@ -1,3 +1,5 @@
+import tracemalloc
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -50,6 +52,19 @@ def test_start_and_step():
     df = generate_frame(1_000, start="2024-05-01 10:00", step="15min", max_repeats=1)
     assert df["dt"].iloc[0] == pd.Timestamp("2024-05-01 10:00")
     assert (df["dt"].diff().dropna() == pd.Timedelta("15min")).all()
+
+
+@pytest.mark.parametrize(("shuffle", "max_bytes_per_row"), [(False, 26), (True, 38)])
+def test_generation_peak_memory_is_close_to_frame_size(shuffle, max_bytes_per_row):
+    """Фрейм — 20 Б/строку; генератор не должен держать несколько его копий одновременно."""
+    n_rows = 1_000_000
+    tracemalloc.start()
+    try:
+        generate_frame(n_rows, shuffle=shuffle)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak / n_rows < max_bytes_per_row
 
 
 @pytest.mark.parametrize("kwargs", [{"n_rows": -1}, {"max_repeats": 0}])

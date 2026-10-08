@@ -35,14 +35,25 @@ def generate_frame(
     counts = rng.integers(1, max_repeats + 1, size=int(n_rows / mean_repeats * 1.05) + 16)
     while counts.sum() < n_rows:  # на практике не срабатывает: запас 5% выше
         counts = np.concatenate([counts, rng.integers(1, max_repeats + 1, size=len(counts))])
-    group = np.repeat(np.arange(len(counts), dtype=np.int64), counts)[:n_rows]
+    # Обрезаем повторы ровно до n_rows, чтобы np.repeat не выделял лишнего.
+    counts = counts[: np.searchsorted(np.cumsum(counts), n_rows) + 1]
+    counts[-1] -= counts.sum() - n_rows
 
-    dt = (pd.Timestamp(start).value + group * pd.Timedelta(step).value).view("datetime64[ns]")
+    # Арифметика in-place, без копий: пик памяти близок к размеру итогового фрейма.
+    dt = np.repeat(np.arange(len(counts), dtype=np.int64), counts)
+    del counts
+    dt *= pd.Timedelta(step).value
+    dt += pd.Timestamp(start).value
+    dt = dt.view("datetime64[ns]")
     ids = np.arange(n_rows, dtype=np.int64)
     value = rng.random(n_rows, dtype=np.float32)
 
     if shuffle:
         perm = rng.permutation(n_rows)
-        dt, ids, value = dt[perm], ids[perm], value[perm]
+        # По одной колонке: в памяти не бывает двух полных копий фрейма сразу.
+        dt = dt[perm]
+        ids = ids[perm]
+        value = value[perm]
+        del perm
 
-    return pd.DataFrame({"dt": dt, "id": ids, "value": value})
+    return pd.DataFrame({"dt": dt, "id": ids, "value": value}, copy=False)

@@ -13,6 +13,11 @@ services:
       - --rows=${ROWS:-1000000}
       - --chunk-size=${CHUNK_SIZE:-100000}
       - --max-repeats=${MAX_REPEATS:-5}
+      - --show=${SHOW:-5}
+      # SAVE_CHUNKS=1 → каждый чанк пишется в ./output/chunk_NNN.csv; по умолчанию выключено.
+      - --output-dir=${SAVE_CHUNKS:+output}
+    volumes:
+      - ./output:/app/output
 
   # Юнит-тесты, включая прогоны на 1 000 000+ строк: docker compose run --rm tests
   tests:
